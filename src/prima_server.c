@@ -40,12 +40,14 @@ void ServerUdp(uint16_t port)
 
     int sockfd;
 
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror("socket creation failed");
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    {
+        fprintf(stderr, "socket creation failed");
         exit(EXIT_FAILURE);
     }
 
-    if (setSocketNonblocking(sockfd) < 0) {
+    if (setSocketNonblocking(sockfd) < 0)
+    {
         fprintf(stderr, "failed to set non-blocking mode on socket\n");
         exit(EXIT_FAILURE);
     }
@@ -56,8 +58,9 @@ void ServerUdp(uint16_t port)
     servaddr.sin_addr.s_addr = INADDR_ANY;
     servaddr.sin_port = htons(port);
 
-    if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
-        perror("bind failed");
+    if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+    {
+        fprintf(stderr, "bind failed");
         exit(EXIT_FAILURE);
     }
 
@@ -67,22 +70,31 @@ void ServerUdp(uint16_t port)
     uint8_t buffer[BUFFER_SIZE];
     socklen_t len = sizeof(cliaddr);
 
-    while (1) {
+    while (1)
+    {
         int ret = poll(fds, 1, TIMEOUT);
-        if (ret < 0) {
-            perror("poll error");
+        if (ret < 0)
+        {
+            fprintf(stderr, "poll error");
             break;
-        } else if (ret == 0) {
+        }
+        else if (ret == 0)
+        {
             continue;
         }
 
-        if (fds[0].revents & POLLIN) {
+        if (fds[0].revents & POLLIN)
+        {
             ssize_t n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&cliaddr, &len);
-            if (n < 0) {
-                if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR) {
+            if (n < 0)
+            {
+                if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
+                {
                     continue;
-                } else {
-                    perror("recvfrom error");
+                }
+                else
+                {
+                    fprintf(stderr, "recvfrom error");
                     break;
                 }
             }
@@ -90,19 +102,24 @@ void ServerUdp(uint16_t port)
             u_int64_t offset = 0;
             int noError = 1;
 
-            while (offset + HEADER_TL <= n) {
+            while (offset + HEADER_TL <= n)
+            {
                 TLVCommand tlvCmd;
-                if (decodeTLV(buffer + offset, n - offset, &tlvCmd) < 0) {
+                if (decodeTLV(buffer + offset, n - offset, &tlvCmd) < 0)
+                {
                     fprintf(stderr, "TLV decoding error\n");
                     noError = 0;
                     break;
                 }
 
                 ssize_t index = getCommandIndex(tlvCmd.tag, commands, commandsAmount);
-                if (index < 0 || !commands[index].isValid(tlvCmd.length, tlvCmd.value)) {
+                if (index < 0 || !commands[index].isValid(tlvCmd.length, tlvCmd.value))
+                {
                     fprintf(stderr, "Invalid command\n");
                     noError = 0;
-                } else {
+                }
+                else
+                {
                     commands[index].processCommand(tlvCmd.length, tlvCmd.value);
                 }
 
@@ -110,10 +127,12 @@ void ServerUdp(uint16_t port)
                 freeTLV(&tlvCmd);
             }
 
-            if (noError) {
+            if (noError)
+            {
                 fds[0].events = POLLOUT;
                 ret = poll(fds, 1, TIMEOUT);
-                if (ret > 0 && (fds[0].revents & POLLOUT)) {
+                if (ret > 0 && (fds[0].revents & POLLOUT))
+                {
                     sendto(sockfd, buffer, n, 0, (const struct sockaddr *)&cliaddr, len);
                 }
                 fds[0].events = POLLIN;
