@@ -18,6 +18,14 @@
 #define HEADER_L 4
 #define HEADER_TL 8
 
+
+typedef struct
+{
+    uint32_t tag;
+    uint32_t length;
+    uint8_t *value;
+} TLVCommand;
+
 typedef struct
 {
     uint32_t tag;
@@ -33,4 +41,6 @@ void processPowerControl(uint32_t length, const uint8_t *value);
 int isValidNetworkLabel(uint32_t length, const uint8_t *value);
 void processNetworkLabel(uint32_t length, const uint8_t *value);
 ssize_t getCommandIndex(uint32_t tag, Command commands[], size_t commandsAmount);
+int decodeTLV(const uint8_t *buffer, size_t buf_size, TLVCommand *tlvCmd);
+void freeTLV(TLVCommand *tlvCmd);
 #endif

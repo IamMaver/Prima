@@ -32,7 +32,6 @@ ssize_t getCommandIndex(uint32_t tag, Command commands[], size_t commandsAmount)
 
 void ServerUdp(uint16_t port)
 {
-
     Command commands[] = {
         {0x0, "Power Control", isValidPowerControl, processPowerControl},
         {0x1, "Network Label", isValidNetworkLabel, processNetworkLabel},
@@ -41,122 +40,82 @@ void ServerUdp(uint16_t port)
 
     int sockfd;
 
-    socklen_t len;
-
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
-    {
-        fprintf(stderr, "socket creation failed\n");
-        exit(-1);
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
     }
 
-    if (setSocketNonblocking(sockfd) < 0)
-    {
+    if (setSocketNonblocking(sockfd) < 0) {
         fprintf(stderr, "failed to set non-blocking mode on socket\n");
         exit(EXIT_FAILURE);
     }
 
     struct sockaddr_in servaddr = {0}, cliaddr = {0};
 
-    servaddr.sin_family = AF_INET; // IPv4
+    servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = INADDR_ANY;
     servaddr.sin_port = htons(port);
 
-    if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
-    {
-        fprintf(stderr, "bind failed");
-        exit(-1);
+    if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
     }
 
     struct pollfd fds[1];
     fds[0].fd = sockfd;
     fds[0].events = POLLIN;
     uint8_t buffer[BUFFER_SIZE];
-    int noError = 1;
-    while (1)
-    {
+    socklen_t len = sizeof(cliaddr);
+
+    while (1) {
         int ret = poll(fds, 1, TIMEOUT);
-        if (ret < 0)
-        {
-            fprintf(stderr, "poll error\n");
+        if (ret < 0) {
+            perror("poll error");
             break;
-        }
-        else if (ret == 0)
-        {
+        } else if (ret == 0) {
             continue;
         }
 
-        if (fds[0].revents & POLLIN)
-        {
-            len = sizeof(cliaddr);
+        if (fds[0].revents & POLLIN) {
             ssize_t n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&cliaddr, &len);
-            if (n < 0)
-            {
-                if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
-                {
+            if (n < 0) {
+                if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR) {
                     continue;
-                }
-                else
-                {
+                } else {
                     perror("recvfrom error");
                     break;
                 }
             }
 
-            int processed_commands = 0;
             u_int64_t offset = 0;
-            noError = 1;
-            while (offset + HEADER_TL <= n)
-            {
+            int noError = 1;
 
-                uint32_t tag, length;
-                memcpy(&tag, buffer + offset, HEADER_T);
-                memcpy(&length, buffer + offset + HEADER_T, HEADER_L);
-
-                tag = ntohl(tag);
-                length = ntohl(length);
-
-                offset += HEADER_TL;
-
-                if (offset + length > n)
-                {
-                    fprintf(stderr, "Invalid length for tag 0x%08X\n", tag);
+            while (offset + HEADER_TL <= n) {
+                TLVCommand tlvCmd;
+                if (decodeTLV(buffer + offset, n - offset, &tlvCmd) < 0) {
+                    fprintf(stderr, "TLV decoding error\n");
+                    noError = 0;
                     break;
                 }
 
-                ssize_t index = getCommandIndex(tag, commands, commandsAmount);
-                if (index < 0 || !commands[index].isValid(length, buffer + offset))
-                {
-                    fprintf(stderr, "ERROR!\n");
+                ssize_t index = getCommandIndex(tlvCmd.tag, commands, commandsAmount);
+                if (index < 0 || !commands[index].isValid(tlvCmd.length, tlvCmd.value)) {
+                    fprintf(stderr, "Invalid command\n");
                     noError = 0;
-                    continue;
+                } else {
+                    commands[index].processCommand(tlvCmd.length, tlvCmd.value);
                 }
-                commands[index].processCommand(length, buffer + offset);
-                offset += length;
-                processed_commands++;
+
+                offset += HEADER_TL + tlvCmd.length;
+                freeTLV(&tlvCmd);
             }
 
-            if (processed_commands > 0 && noError)
-            {
+            if (noError) {
                 fds[0].events = POLLOUT;
-
-                int ret = poll(fds, 1, TIMEOUT);
-                if (ret > 0 && (fds[0].revents & POLLOUT))
-                {
-                    ssize_t sent_bytes = sendto(sockfd, buffer, n, 0, (const struct sockaddr *)&cliaddr, len);
-                    if (sent_bytes < 0)
-                    {
-                        fprintf(stderr, "sendto failed\n");
-                    }
+                ret = poll(fds, 1, TIMEOUT);
+                if (ret > 0 && (fds[0].revents & POLLOUT)) {
+                    sendto(sockfd, buffer, n, 0, (const struct sockaddr *)&cliaddr, len);
                 }
-                else if (ret < 0)
-                {
-                    fprintf(stderr, "poll error during send\n");
-                }
-                else if (ret == 0)
-                {
-                    fprintf(stderr, "timeout waiting for socket to become writable\n");
-                }
-
                 fds[0].events = POLLIN;
             }
         }
