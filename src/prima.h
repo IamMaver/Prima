@@ -11,25 +11,26 @@
 #include <poll.h>
 #include <fcntl.h>
 
-#define PORT 31337 // We are Elite))
-#define BUFFER_SIZE 1024
-#define TIMEOUT 5000
+#define PORT 31337
+#define BUFFER_SIZE 65535
+#define TIMEOUT -1
+#define HEADER_T 4
+#define HEADER_L 4
+#define HEADER_TL 8
 
 typedef struct
 {
     uint32_t tag;
     char *nameCommand;
     int (*isValid)(uint32_t length, const uint8_t *value);
-    void (*processCommand)(uint32_t length, const uint8_t *value, char *nameCommand);
+    void (*processCommand)(uint32_t length, const uint8_t *value);
 } Command;
 
-int isValid(uint32_t length, const uint8_t *value);
-void processCommand(uint32_t length, const uint8_t *value, char *nameCommand);
-void Server_UDP(uint16_t port);
-int set_socket_nonblocking(int sockfd);
+void ServerUdp(uint16_t port);
+int setSocketNonblocking(int sockfd);
 int isValidPowerControl(uint32_t length, const uint8_t *value);
-void processPowerControl(uint32_t length, const uint8_t *value, char *nameCommand);
+void processPowerControl(uint32_t length, const uint8_t *value);
 int isValidNetworkLabel(uint32_t length, const uint8_t *value);
-void processNetworkLabel(uint32_t length, const uint8_t *value, char *nameCommand);
+void processNetworkLabel(uint32_t length, const uint8_t *value);
 ssize_t getCommandIndex(uint32_t tag, Command commands[], size_t commandsAmount);
 #endif

@@ -1,60 +1,19 @@
 #include "prima.h"
 
-int set_socket_nonblocking(int sockfd)
+int setSocketNonblocking(int sockfd)
 {
     int flags = fcntl(sockfd, F_GETFL, 0);
     if (flags == -1)
     {
-        perror("fcntl F_GETFL");
+        fprintf(stderr, "fcntl F_GETFL\n");
         return -1;
     }
     if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1)
     {
-        perror("fcntl F_SETFL O_NONBLOCK");
+        fprintf(stderr, "fcntl F_SETFL O_NONBLOCK\n");
         return -1;
     }
     return 0;
-}
-
-//Для добавления команд нужно подготовить для них 2 функции - валидатор и исполнитель, а также добавить их в массив, не забыв увеличить переменную с размером массива.
-
-int isValidPowerControl(uint32_t length, const uint8_t *value)
-{
-    if (length != 1 || (value[0] != 0 && value[0] != 1))
-    {
-        return 0;
-    }
-    return 1;
-}
-
-void processPowerControl(uint32_t length, const uint8_t *value, char *nameCommand)
-{
-    if (value[0] == 0)
-    {
-        fprintf(stderr, "%s: Power ON\n", nameCommand);
-    }
-    else
-    {
-        fprintf(stderr, "%s: Power OFF\n", nameCommand);
-    }
-}
-
-int isValidNetworkLabel(uint32_t length, const uint8_t *value)
-{
-    if (length == 0 || length > 255)
-    {
-        return 0;
-    }
-    return 1;
-}
-
-void processNetworkLabel(uint32_t length, const uint8_t *value, char *nameCommand)
-{
-    // немного кода для борьбы со злыми ненультерминированными строками
-    char networkLabel[256];
-    memcpy(networkLabel, value, length);
-    networkLabel[255] = 0;
-    fprintf(stderr, "%s: Network label = %.*s\n", networkLabel, length, value);
 }
 
 ssize_t getCommandIndex(uint32_t tag, Command commands[], size_t commandsAmount)
@@ -71,28 +30,32 @@ ssize_t getCommandIndex(uint32_t tag, Command commands[], size_t commandsAmount)
     return result;
 }
 
-void Server_UDP(uint16_t port)
+void ServerUdp(uint16_t port)
 {
 
     Command commands[] = {
         {0x0, "Power Control", isValidPowerControl, processPowerControl},
         {0x1, "Network Label", isValidNetworkLabel, processNetworkLabel},
     };
-    size_t commandsAmount = 2; // Ох уж мне эти Сишные массивы((
+    size_t commandsAmount = sizeof(commands) / sizeof(commands[0]);
 
     int sockfd;
-    struct sockaddr_in servaddr, cliaddr;
+
     socklen_t len;
-    uint8_t buffer[BUFFER_SIZE];
 
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
     {
-        perror("socket creation failed");
+        fprintf(stderr, "socket creation failed\n");
         exit(-1);
     }
 
-    memset(&servaddr, 0, sizeof(servaddr));
-    memset(&cliaddr, 0, sizeof(cliaddr));
+    if (setSocketNonblocking(sockfd) < 0)
+    {
+        fprintf(stderr, "failed to set non-blocking mode on socket\n");
+        exit(EXIT_FAILURE);
+    }
+
+    struct sockaddr_in servaddr = {0}, cliaddr = {0};
 
     servaddr.sin_family = AF_INET; // IPv4
     servaddr.sin_addr.s_addr = INADDR_ANY;
@@ -100,37 +63,35 @@ void Server_UDP(uint16_t port)
 
     if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
     {
-        perror("bind failed");
-        close(sockfd);
+        fprintf(stderr, "bind failed");
         exit(-1);
     }
 
     struct pollfd fds[1];
     fds[0].fd = sockfd;
     fds[0].events = POLLIN;
-
+    uint8_t buffer[BUFFER_SIZE];
+    int noError = 1;
     while (1)
     {
         int ret = poll(fds, 1, TIMEOUT);
         if (ret < 0)
         {
-            perror("poll error");
+            fprintf(stderr, "poll error\n");
             break;
         }
         else if (ret == 0)
         {
-            // Таймаут
-            // fprintf(stderr, "Timeout occurred, no data received.\n");
             continue;
         }
 
         if (fds[0].revents & POLLIN)
         {
             len = sizeof(cliaddr);
-            int n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&cliaddr, &len);
+            ssize_t n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&cliaddr, &len);
             if (n < 0)
             {
-                if (errno == EWOULDBLOCK || errno == EAGAIN)
+                if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
                 {
                     continue;
                 }
@@ -142,19 +103,19 @@ void Server_UDP(uint16_t port)
             }
 
             int processed_commands = 0;
-            int offset = 0;
-
-            while (offset + 8 <= n)
+            u_int64_t offset = 0;
+            noError = 1;
+            while (offset + HEADER_TL <= n)
             {
 
                 uint32_t tag, length;
-                memcpy(&tag, buffer + offset, 4);
-                memcpy(&length, buffer + offset + 4, 4);
+                memcpy(&tag, buffer + offset, HEADER_T);
+                memcpy(&length, buffer + offset + HEADER_T, HEADER_L);
 
                 tag = ntohl(tag);
                 length = ntohl(length);
 
-                offset += 8;
+                offset += HEADER_TL;
 
                 if (offset + length > n)
                 {
@@ -163,19 +124,40 @@ void Server_UDP(uint16_t port)
                 }
 
                 ssize_t index = getCommandIndex(tag, commands, commandsAmount);
-                if (index<0||!commands[index].isValid(length, buffer + offset))
+                if (index < 0 || !commands[index].isValid(length, buffer + offset))
                 {
-                    fprintf(stderr,"ERROR!\n");
-                    break;
+                    fprintf(stderr, "ERROR!\n");
+                    noError = 0;
+                    continue;
                 }
-                commands[index].processCommand(length, buffer + offset, commands[tag].nameCommand);
+                commands[index].processCommand(length, buffer + offset);
                 offset += length;
                 processed_commands++;
             }
 
-            if (processed_commands > 0 && offset == n)
+            if (processed_commands > 0 && noError)
             {
-                sendto(sockfd, buffer, n, 0, (const struct sockaddr *)&cliaddr, len);
+                fds[0].events = POLLOUT;
+
+                int ret = poll(fds, 1, TIMEOUT);
+                if (ret > 0 && (fds[0].revents & POLLOUT))
+                {
+                    ssize_t sent_bytes = sendto(sockfd, buffer, n, 0, (const struct sockaddr *)&cliaddr, len);
+                    if (sent_bytes < 0)
+                    {
+                        fprintf(stderr, "sendto failed\n");
+                    }
+                }
+                else if (ret < 0)
+                {
+                    fprintf(stderr, "poll error during send\n");
+                }
+                else if (ret == 0)
+                {
+                    fprintf(stderr, "timeout waiting for socket to become writable\n");
+                }
+
+                fds[0].events = POLLIN;
             }
         }
     }

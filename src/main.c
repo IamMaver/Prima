@@ -2,6 +2,6 @@
 
 int main()
 {
-    Server_UDP(PORT);
+    ServerUdp(PORT);
     return 0;
 }

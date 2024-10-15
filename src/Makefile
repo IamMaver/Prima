@@ -2,13 +2,13 @@ CC = gcc
 CFLAGS = -std=c11
 SF = -fsanitize=leak,address
 
-all: primaUDPServer
+all: primaUdpServer
 
-primaUDPServer: main.c
-	$(CC) $(CFLAGS) prima_server.c main.c  -o prima
+primaUdpServer: main.c prima_server.c
+	$(CC) $(CFLAGS) main.c prima_functions.c prima_server.c -o prima
 
 test: prima
-	$(CC) $(CFLAGS) -o prima_test prima_server.c ./test/test.c -lcheck -lsubunit -lm
+	$(CC) $(CFLAGS) -o prima_test prima_functions.c prima_server.c ./test/test.c -lcheck -lsubunit -lm
 	./prima_test
 clean:
 	rm -rf prima prima_test
